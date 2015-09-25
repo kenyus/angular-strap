@@ -139,7 +139,7 @@
         return $filter('filter')(array, expression, comparator);
       }
     };
-  } ]).directive('bsTypeahead', [ '$window', '$parse', '$q', '$typeahead', '$parseOptions', function($window, $parse, $q, $typeahead, $parseOptions) {
+  }]).directive('bsTypeahead', ['$window', '$parse', '$q', '$typeahead', '$parseOptions', '$timeout', function ($window, $parse, $q, $typeahead, $parseOptions, $timeout) {
     var defaults = $typeahead.defaults;
     return {
       restrict: 'EAC',
@@ -174,20 +174,33 @@
             });
           });
         }
-        scope.$watch(attr.ngModel, function(newValue, oldValue) {
-          scope.$modelValue = newValue;
-          parsedOptions.valuesFn(scope, controller).then(function(values) {
-            if (options.selectMode && !values.length && newValue.length > 0) {
-              controller.$setViewValue(controller.$viewValue.substring(0, controller.$viewValue.length - 1));
-              return;
-            }
-            if (values.length > limit) values = values.slice(0, limit);
-            var isVisible = typeahead.$isVisible();
-            isVisible && typeahead.update(values);
-            if (values.length === 1 && values[0].value === newValue) return;
-            !isVisible && typeahead.update(values);
-            controller.$render();
-          });
+          //KHA 26/11/14: updated to enfore delay
+        var timeoutPromise; // add
+          // Watch model for changes
+        scope.$watch(attr.ngModel, function (newValue, oldValue) {
+            // console.warn('$watch', element.attr('ng-model'), newValue);
+            scope.$modelValue = newValue; // Publish modelValue on scope for custom templates
+            $timeout.cancel(timeoutPromise); //does nothing, if timeout alrdy done // add
+            timeoutPromise = $timeout(function () { //Set timeout
+                if (newValue && +options.minLength <= newValue.length) // add
+                    parsedOptions.valuesFn(scope, controller)
+                        .then(function (values) {
+                            // Prevent input with no future prospect if selectMode is truthy
+                            // @TODO test selectMode
+                            if (options.selectMode && !values.length && newValue.length > 0) {
+                                controller.$setViewValue(controller.$viewValue.substring(0, controller.$viewValue.length - 1));
+                                return;
+                            }
+                            if (values.length > limit) values = values.slice(0, limit);
+                            var isVisible = typeahead.$isVisible();
+                            isVisible && typeahead.update(values);
+                            // Do not re-queue an update if a correct value has been selected
+                            if (values.length === 1 && values[0].value === newValue) return;
+                            !isVisible && typeahead.update(values);
+                            // Queue a new rendering that will leverage collection loading
+                            controller.$render();
+                        });
+            }, +options.delay);
         });
         controller.$formatters.push(function(modelValue) {
           var displayValue = parsedOptions.displayValue(modelValue);
@@ -2120,11 +2133,14 @@
           }
         }
         function unbindBackdropEvents() {
-          if (options.backdrop) {
-            modalElement.off('click', hideOnBackdropClick);
-            backdropElement.off('click', hideOnBackdropClick);
-            backdropElement.off('wheel', preventEventDefault);
-          }
+            if (options.backdrop) {
+                if (modalElement !== null)  //KHA 24/09/15: this get called multiple time for some reason? one when get hide and when get destroy? can remove this in future if possible
+                    modalElement.off('click', hideOnBackdropClick);
+                if (backdropElement !== null) {
+                    backdropElement.off('click', hideOnBackdropClick);
+                    backdropElement.off('wheel', preventEventDefault);
+                }
+            }
         }
         function bindKeyboardEvents() {
           if (options.keyboard) {
@@ -2132,9 +2148,9 @@
           }
         }
         function unbindKeyboardEvents() {
-          if (options.keyboard) {
-            modalElement.off('keyup', $modal.$onKeyUp);
-          }
+            if (modalElement !== null && options.keyboard) {    //KHA 24/09/15: this get called multiple time for some reason? one when get hide and when get destroy? can remove this in future if possible
+                modalElement.off('keyup', $modal.$onKeyUp);
+            }
         }
         function hideOnBackdropClick(evt) {
           if (evt.target !== evt.currentTarget) return;
